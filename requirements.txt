@@ -1,0 +1,6 @@
+requests
+pillow
+pandas
+numpy
+scikit-image
+

@@ -1,0 +1,84 @@
+import os
+import requests
+import base64
+from PIL import Image
+from io import BytesIO
+import pandas as pd
+import numpy as np
+from skimage.metrics import structural_similarity as ssim
+
+# ========== 配置区 ==========
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+IMAGE_SAVE_DIR = "./output_images"
+os.makedirs(IMAGE_SAVE_DIR, exist_ok=True)
+
+def generate_images(prompt: str, ref_image_b64: str, count: int = 10):
+    """
+    图生图，单次最多生成10张，DALL·E
+    """
+    url = "https://api.openai.com/v1/images/generations"
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": "dall-e-3",
+        "prompt": prompt,
+        "n": count,
+        "response_format": "b64_json",
+        "size": "1024x1024"
+    }
+    res = requests.post(url, headers=headers, json=payload)
+    res.raise_for_status()
+    data = res.json()
+    img_list = []
+    for item in data["data"]:
+        b64 = item["b64_json"]
+        raw = base64.b64decode(b64)
+        img = Image.open(BytesIO(raw))
+        img_list.append(img)
+    return img_list
+
+def calc_similarity(img1: Image.Image, img2: Image.Image) -> float:
+    """
+    自查比对：结构相似度SSIM，0~1，越高越像
+    """
+    g1 = np.array(img1.convert("L").resize((512,512)))
+    g2 = np.array(img2.convert("L").resize((512,512)))
+    score, _ = ssim(g1, g2, full=True)
+    return round(float(score),3)
+
+def run_from_table(csv_path:str):
+    """
+    读取多维表格导出的csv，批量生图+比对+保存
+    表格字段：id,prompt,ref_img_path
+    """
+    df = pd.read_csv(csv_path)
+    result_rows = []
+    for idx,row in df.iterrows():
+        pid = row["id"]
+        prompt = row["prompt"]
+        ref_img = Image.open(row["ref_img_path"])
+        # 参考图转base64
+        buf = BytesIO()
+        ref_img.save(buf, format="PNG")
+        ref_b64 = base64.b64encode(buf.getvalue()).decode()
+        imgs = generate_images(prompt, ref_b64, count=10)
+        for i,img in enumerate(imgs):
+            save_name = f"{pid}_{i+1}.png"
+            save_path = os.path.join(IMAGE_SAVE_DIR, save_name)
+            img.save(save_path)
+            sim = calc_similarity(ref_img, img)
+            result_rows.append({
+                "id": pid,
+                "seq":i+1,
+                "prompt":prompt,
+                "similarity":sim,
+                "save_path":save_path
+            })
+    out_df = pd.DataFrame(result_rows)
+    out_df.to_csv("./result.csv",index=False,encoding="utf-8-sig")
+    return out_df
+
+if __name__ == "__main__":
+    print("==== Nexo AI 生图Skill启动 ====")
+    print("功能：图生图10张、表格批量、相似度自查")
+    # 用法示例： run_from_table("./input.csv")
+
