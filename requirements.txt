@@ -1,6 +1,4 @@
-requests
-pillow
-pandas
-numpy
-scikit-image
-
+requests>=2.32.3,<3
+Pillow>=10.4,<13
+numpy>=1.26,<3
+scikit-image>=0.24,<1
